@@ -1,11 +1,7 @@
-struct A{
-    int a = 0;
-    int b = 0;
-};
-
+#define TEST 
+TEST;
 int main(){
-    A a;
-    a.a = 1;
-    a.b = 2;
-    return a.b+a.a;
+    int a = 0;
+    a+2;
+    return 0;
 }
