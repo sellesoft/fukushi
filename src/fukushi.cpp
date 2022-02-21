@@ -36,6 +36,53 @@ void printTSQueryError(const char* source, u32 erroff, TSQueryError err){
 
 }
 
+
+
+//source struct with methods to help navigate and manipulate source code by lines and columns 
+struct Source {
+    array<string> lines;
+
+
+
+    //inserts a line before the specified line
+    void add_line(u32 idx, const string& line){
+        lines.insert(line, idx);
+        
+    }
+    
+    void replace_line(u32 idx, const string& line){
+        
+    }
+
+    void remove_line(u32 idx){
+        lines.remove(idx);
+    }
+
+    //returns a cstring pointing to 
+
+    cstring at(u32 line, u32 column){
+        return {lines[line].str+column, lines[line].count-column};
+    }
+
+};
+
+void treeheaderrecur(TSNode node){
+    static u32 id = 0;
+    id++;
+    if(UI::BeginHeader(toStr(ts_node_type(node), "##", id).str, UIHeaderFlags_NoIndentRight)){
+        forI(ts_node_child_count(node)){
+            treeheaderrecur(ts_node_child(node, i));    
+        }
+        if(UI::IsLastItemHovered()){
+            UI::Continue("mainwin/codewin");{
+                
+            }UI::EndContinue();
+        }
+
+        UI::EndHeader();
+    }
+}
+
 s32 main(){
     Assets::enforceDirectories();
 	memory_init(Gigabytes(1), Gigabytes(1));
@@ -50,7 +97,12 @@ s32 main(){
 	Render::UseDefaultViewProjMatrix();
 
     File in = open_file("src/test.cpp", FileAccess_Read);
+    char* data = read_file(in);
     FileReader reader = init_reader(in);
+    string mutablecode = reader.raw;
+    FileReader mutablereader = init_reader(mutablecode.str, mutablecode.count); 
+
+    Source source(reader.raw);
 
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_cpp());
@@ -59,28 +111,6 @@ s32 main(){
 
     TIMER_START(t_f);
 	TIMER_START(fun);
-    //const char* query = ""
-    //"(binary_expression)@capture"
-    //"(function_definition)@capture";
-    //u32 erroffset = 0;
-    //TSQueryError qerror=TSQueryErrorNone;
-    //TSQuery* q = ts_query_new(tree_sitter_cpp(), query, strlen(query), &erroffset, &qerror);
-    //if(!q)printTSQueryError(query, erroffset, qerror);
-    //TSQueryCursor* cursor = ts_query_cursor_new();
-    //ts_query_cursor_exec(cursor, q, ts_tree_root_node(tree));
-    //array<TSNode> matches;
-    //TSQueryMatch* match = (TSQueryMatch*)memalloc(sizeof(TSQueryMatch));
-    //PRINTLN("\n\n\n\n");
-    //while(ts_query_cursor_next_match(cursor, match)){
-
-    //    forI(match->capture_count){
-    //        matches.add(match->captures[i].node);
-    //    }
-    //}
-    //for(TSNode n : matches){
-    //    PRINTLN(ts_node_string(n));
-    //   // Log("",cstring{buffer + ts_node_start_byte(n), ts_node_end_byte(n)-ts_node_start_byte(n)});
-    //}
     while(!DeshWindow->ShouldClose()){
         DeshWindow->Update();
 		DeshTime->Update();
@@ -101,20 +131,30 @@ s32 main(){
         SetNextWindowPos(vec2::ZERO);
         Begin("mainwin", UIWindowFlags_NoInteract);{
             array<UIItem*> lines; 
+            array<UIItem*> mutatedlines;
 
             PushColor(UIStyleCol_WindowBg, color(20,20,20));
             PushColor(UIStyleCol_Border, color(75,75,75));
-            SetNextWindowSize(vec2((GetMarginedRight()-GetMarginedLeft())*0.5, MAX_F32));
+            SetNextWindowSize(vec2((GetMarginedRight()-GetMarginedLeft())*0.5, (GetMarginedBottom()-GetMarginedTop())*0.5));
+            UIItem* codewinitem = 0;
             BeginChild("codewin", vec2::ZERO);{
-                PushLayer(GetCurrentLayer()+1);
+                
                 for(cstring& line : reader.lines){
                     Text(line, UITextFlags_NoWrap);
                     lines.add(GetLastItem());
                 }
-                PopLayer();
+            }EndChild();
+            codewinitem=GetLastItem();
+            SetWinCursor(codewinitem->position.yAdd(codewinitem->size.y));
+            SetNextWindowSize(vec2((GetMarginedRight()-GetMarginedLeft())*0.5, (GetMarginedBottom()-GetMarginedTop())*0.5));
+            BeginChild("mutatedcodewin",vec2::ZERO);{
+                for(cstring& line : mutablereader.lines){
+                    Text(line, UITextFlags_NoWrap);
+                    mutatedlines.add(GetLastItem());
+                }
             }EndChild();
            
-            SetWinCursor(GetLastItemPos().xAdd(GetLastItemSize().x));            
+            SetWinCursor(codewinitem->position.xAdd(codewinitem->size.x));            
             SetNextWindowSize(vec2((GetMarginedRight()-GetMarginedLeft())*0.5, MAX_F32));
             BeginChild("infowin", vec2::ZERO);{
                 PushVar(UIStyleVar_WindowMargins, vec2::ZERO);
@@ -218,12 +258,6 @@ s32 main(){
                                                 }
                                             }
                                         }
-                            
-
-                                    
-                                        //vec2 lpos = line_positions[start.row];
-                                        //vec2 charpos = CalcCharPosition(reader.lines[start.row], start.column);
-                                        //Rect(lpos+charpos, vec2::ONE*30);
                                         PopLayer();
                                     }EndContinue();
                                    
@@ -235,7 +269,47 @@ s32 main(){
                         EndTab();
                     }
                     if(BeginTab("Syntax Tree")){
-                        Text("placeholder");
+                        u32 id = 0;
+                        auto recur = [&](TSNode node, auto&& recur)->void{
+                            id++;
+                            if(UI::BeginHeader(toStr(ts_node_type(node), "##", id).str, UIHeaderFlags_NoIndentRight)){
+                                bool hovered = UI::IsLastItemHovered();
+                                forI(ts_node_named_child_count(node)){
+                                    recur(ts_node_named_child(node, i), recur);   
+                                }
+                                if(hovered){
+                                    TSPoint start = ts_node_start_point(node);
+                                    TSPoint end = ts_node_end_point(node);
+                                    UI::Continue("mainwin/codewin");{
+                                        PushLayer(GetCurrentLayer()-1);
+                                        if(start.row==end.row){
+                                            vec2 scharpos = CalcCharPosition(reader.lines[start.row], start.column);
+                                            vec2 echarpos = CalcCharPosition(reader.lines[start.row], end.column);
+                                            RectFilled(lines[start.row]->position+scharpos, vec2(echarpos.x-scharpos.x,GetStyle().fontHeight), (hovered?color(50,144,75,255):color(50,75,75)));
+                                        }
+                                        else{
+                                            for(u32 i = start.row; i <= end.row; i++){
+                                                if(i==start.row){
+                                                    vec2 scharpos = CalcCharPosition(reader.lines[start.row], start.column);
+                                                    RectFilled(lines[start.row]->position+scharpos, vec2((lines[start.row]->position.x+lines[start.row]->size.x)-scharpos.x,GetStyle().fontHeight), (hovered?color(50,144,75,255):color(50,75,75)));
+                                                }
+                                                else if(i==end.row){
+                                                    vec2 echarpos = CalcCharPosition(reader.lines[start.row], end.column);
+                                                    RectFilled(lines[end.row]->position, vec2(echarpos.x, GetStyle().fontHeight),(hovered?color(50,144,75,255):color(50,75,75)));
+                                                }
+                                                else{
+                                                    RectFilled(lines[i]->position, lines[i]->size, (hovered?color(50,144,75,255):color(50,75,75)));
+                                                }
+                                            }
+                                        }
+                                        PopLayer();
+                                    }UI::EndContinue();
+                                }
+                                UI::EndHeader();
+                            }
+                        };
+                        recur(ts_tree_root_node(tree), recur);
+
                         EndTab();
                     }
                 }EndTabBar();
